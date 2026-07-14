@@ -17,6 +17,20 @@ class JablotronApiException(Exception):
     """Exception raised when request fails with unexpected status code."""
 
 
+class TooManyRequestsException(JablotronApiException):
+    """Exception raised when request fails with 429 status code."""
+
+    def __init__(self, message: str, retry_after: int | None = None) -> None:
+        """Initialize exception with optional retry delay.
+
+        :param message: error message
+        :param retry_after: number of seconds to wait before retrying, if provided by the API
+        """
+
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class InvalidSessionIdException(Exception):
     """Exception raised when login response does not contain a valid session id."""
 

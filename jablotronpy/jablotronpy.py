@@ -1,5 +1,7 @@
 """Client for Jablotron API integration."""
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
 from typing import Literal
 
@@ -14,6 +16,7 @@ from jablotronpy.exceptions import (
     JablotronApiException,
     NoPinCodeException,
     SessionExpiredException,
+    TooManyRequestsException,
     UnauthorizedException,
 )
 from jablotronpy.types import (
@@ -32,6 +35,26 @@ from jablotronpy.types import (
     JablotronThermoDevice,
     JablotronThermoDeviceState,
 )
+
+
+def _parse_retry_after(value: str | None) -> int | None:
+    """Parse a Retry-After header value (seconds or HTTP-date) into seconds.
+
+    :param value: raw Retry-After header value
+    """
+
+    if value is None:
+        return None
+
+    if value.isdigit():
+        return int(value)
+
+    try:
+        retry_date = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+
+    return max(0, int((retry_date - datetime.now(timezone.utc)).total_seconds()))
 
 
 class Jablotron:
@@ -82,6 +105,11 @@ class Jablotron:
                 raise UnauthorizedException("Failed to authenticate using entered credentials or session id expired.")
             case 408:
                 raise SessionExpiredException("Session expired, please re-login.")
+            case 429:
+                raise TooManyRequestsException(
+                    "Too many requests, API rate limit exceeded.",
+                    retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+                )
             case _:
                 raise JablotronApiException(response.text)
 
@@ -107,6 +135,11 @@ class Jablotron:
                 raise UnauthorizedException("Failed to authenticate using entered credentials or session id expired.")
             case 408:
                 raise SessionExpiredException("Session expired, please re-login.")
+            case 429:
+                raise TooManyRequestsException(
+                    "Too many requests, API rate limit exceeded.",
+                    retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+                )
             case _:
                 raise JablotronApiException(response.text)
 
@@ -145,6 +178,9 @@ class Jablotron:
 
     def perform_login(self) -> None:
         """Retrieve API session id and set it as cookie header."""
+
+        # Drop any previous session cookie so the login response always carries a fresh PHPSESSID
+        self._headers.pop("Cookie", None)
 
         response = self._send_request(
             endpoint="userAuthorize.json",
